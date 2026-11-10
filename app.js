@@ -110,7 +110,7 @@
   const S = {
     cls: '', room: '', roomLabel: '', name: '', role: '', cid: sessionId(),
     events: [], seq: 0, dv: -1, draft: {}, presence: [], view: null,
-    sel: { sample: '', tool: '', prop: '', temp: 0 }, selAt: 0, draftBy: '',
+    sel: { sample: '', tool: '', prop: '', temp: 0, liquid: '' }, selAt: 0, draftBy: '',
     tab: 'survey', banner: null, shownLog: 0, lastActive: Date.now(), net: null,
     online: true, polling: false, pollTimer: null, draftTimer: null, gallery: null
   };
@@ -142,10 +142,15 @@
     if (v.log.length !== prevLen) {
       if (hadView && v.log.length > prevLen) S.banner = v.log[v.log.length - 1];   // 새 실행 결과(내 기기·다른 기기 모두)
       else S.banner = null;                                                        // 되돌리기·처음부터·혼합물 변경
-      S.sel = { sample: '', tool: '', prop: '', temp: 0 };
+      S.sel = { sample: '', tool: '', prop: '', temp: 0, liquid: '' };
     }
   }
-  const startMixture = () => (CFG.MIX_MODE === 'variant' && E.MIXES[E.variantFor(String(S.room).split('-')[0])]) ? E.variantFor(String(S.room).split('-')[0]) : (E.MIXES[CFG.FIXED_MIXTURE] ? CFG.FIXED_MIXTURE : 'L2');
+  const groupNo = () => String(S.room).split('-')[0];
+  const isVariant = () => CFG.MIX_MODE !== 'fixed';
+  const startMixture = () => {
+    const n = groupNo(), id = CFG.MIX_MODE === 'melting' ? E.advFor(n) : CFG.MIX_MODE === 'solids' ? E.solFor(n) : CFG.MIX_MODE === 'variant' ? E.variantFor(n) : '';
+    return E.MIXES[id] ? id : (E.MIXES[CFG.FIXED_MIXTURE] ? CFG.FIXED_MIXTURE : 'L2');
+  };
 
   function applyPayload(resp) {
     if (!resp || !resp.ok) return false;
@@ -162,8 +167,8 @@
     if (resp.draft !== undefined && Date.now() - S.selAt > 1500) {
       S.dv = resp.dv;
       const d = resp.draft || {};
-      const nd = { sample: d.sample || '', tool: d.tool || '', prop: d.prop || '', temp: Number(d.temp) || 0 };
-      if (nd.sample !== S.sel.sample || nd.tool !== S.sel.tool || nd.prop !== S.sel.prop || nd.temp !== S.sel.temp) { S.sel = nd; draftChanged = true; S.lastActive = Date.now(); }
+      const nd = { sample: d.sample || '', tool: d.tool || '', prop: d.prop || '', temp: Number(d.temp) || 0, liquid: d.liquid || '' };
+      if (nd.sample !== S.sel.sample || nd.tool !== S.sel.tool || nd.prop !== S.sel.prop || nd.temp !== S.sel.temp || nd.liquid !== S.sel.liquid) { S.sel = nd; draftChanged = true; S.lastActive = Date.now(); }
       S.draftBy = d.by || '';
     }
     if (changed) recompute();
@@ -206,7 +211,7 @@
     S.selAt = Date.now(); S.lastActive = Date.now();
     clearTimeout(S.draftTimer);
     S.draftTimer = setTimeout(() => {
-      S.net.draft(ctx(), { tool: S.sel.tool, sample: S.sel.sample, prop: S.sel.prop, temp: S.sel.temp || 0, by: S.name }).catch(() => {});
+      S.net.draft(ctx(), { tool: S.sel.tool, sample: S.sel.sample, prop: S.sel.prop, temp: S.sel.temp || 0, liquid: S.sel.liquid || '', by: S.name }).catch(() => {});
     }, 250);
   }
 
@@ -231,7 +236,7 @@
   }
 
   async function enter(cls, room, roomLabel, name, role) {
-    Object.assign(S, { cls, room, roomLabel, name, role, events: [], seq: 0, dv: -1, view: null, banner: null, sel: { sample: '', tool: '', prop: '', temp: 0 }, tab: 'survey', gallery: null });
+    Object.assign(S, { cls, room, roomLabel, name, role, events: [], seq: 0, dv: -1, view: null, banner: null, sel: { sample: '', tool: '', prop: '', temp: 0, liquid: '' }, tab: 'survey', gallery: null });
     S.net = CFG.BACKEND_URL ? new RemoteNet(CFG.BACKEND_URL) : new LocalNet();
     if (S.net.mode === 'local') S.net.onChange = () => pollOnce();
     try {
@@ -293,11 +298,13 @@
   const AI_ROWS = 3;
   const AI_FIELDS = ['끓는점', '녹는점', '밀도', '물에 대한 성질', '자석에 붙는가'];
   const AI_VERDICTS = ['같다', '다르다', '확인 못함'];
+  const AI_UNITS = { '끓는점': '℃', '녹는점': '℃', '밀도': 'g/cm³' };   // 항목을 고르면 단위가 자동으로 붙어요
+  const aiVal = (r, k) => r[k] + (AI_UNITS[r.field] && /^-?[\d.]+$/.test(r[k]) ? AI_UNITS[r.field] : '');
   function aiRecords(fields) {
     const out = [];
     for (let i = 0; i < AI_ROWS; i++) {
       const g = k => (fields['ai.' + i + '.' + k] || '').trim();
-      const r = { sub: g('sub'), field: g('field'), ai: g('ai'), ref: g('ref'), verdict: g('verdict'), src: g('src') };
+      const r = { sub: g('sub'), field: g('field'), ai: g('ai'), ref: g('ref'), verdict: g('verdict'), src: g('src'), temp: g('temp') };
       if (r.ai || r.ref) out.push(r);
     }
     return out;
@@ -314,8 +321,9 @@
     if (surveyBuiltFor !== m.id) {
       surveyBuiltFor = m.id;
       const subs = Array.from(new Set(m.comps.map(c => c.s)));
-      const head = '<tr><th>물질</th>' + E.FIELDS.map(f => `<th>${f.label}</th>`).join('') + '</tr>';
-      const rows = subs.map(s => '<tr><td class="name">' + esc(E.SUBS[s].name) + '</td>' + E.FIELDS.map(f => {
+      const FLD = E.fieldsOf(m);
+      const head = '<tr><th>물질</th>' + FLD.map(f => `<th>${f.label}</th>`).join('') + '</tr>';
+      const rows = subs.map(s => '<tr><td class="name">' + esc(E.SUBS[s].name) + '</td>' + FLD.map(f => {
         const b = m.blanks.find(x => x.s === s && x.k === f.k);
         if (!b) return '<td>' + esc(E.showValue(s, f.k)) + '</td>';
         const key = `survey.${s}.${f.k}`;
@@ -326,23 +334,24 @@
         return `<td data-cell="${key}"><input type="text" inputmode="decimal" data-key="${key}" placeholder="조사해서 입력" aria-label="${esc(E.SUBS[s].name)} ${f.label}"><span class="mark"></span></td>`;
       }).join('') + '</tr>').join('');
       const names = subs.map(x => E.SUBS[x].name);
-      const promptExample = `${names.join(', ')}의 끓는점, 녹는점, 밀도, 물에 대한 용해성을 알려 줘. 중학생이 이해할 수 있게 표로 정리하고, 값의 출처도 함께 알려 줘.`;
+      const promptExample = `${names.join(', ')}의 ${FLD.filter(f => f.k !== 'state').map(f => ({ bp: '끓는점', mp: '녹는점', dens: '밀도', sol: '물에 대한 용해성', mag: '자석에 붙는지' }[f.k])).join(', ')}를 알려 줘. 중학생이 이해할 수 있게 표로 정리하고, 값의 출처도 함께 알려 줘.`;
       const optList = arr => '<option value="">선택</option>' + arr.map(o => `<option>${esc(o)}</option>`).join('');
       let aiRows = '';
       for (let i = 0; i < AI_ROWS; i++) {
         aiRows += `<tr><td>${i + 1}</td>
           <td><select data-key="ai.${i}.sub" aria-label="물질">${optList(names)}</select></td>
-          <td><select data-key="ai.${i}.field" aria-label="항목">${optList(AI_FIELDS)}</select></td>
-          <td><input type="text" maxlength="40" data-key="ai.${i}.ai" aria-label="AI가 알려준 값"></td>
-          <td><input type="text" maxlength="40" data-key="ai.${i}.ref" aria-label="교과서·자료의 값"></td>
+          <td><select data-key="ai.${i}.field" aria-label="항목">${optList(AI_FIELDS.filter(x => FLD.some(f => ({ bp: '끓는점', mp: '녹는점', dens: '밀도', sol: '물에 대한 성질', mag: '자석에 붙는가' }[f.k]) === x)))}</select></td>
+          <td><div class="uwrap"><input type="text" maxlength="40" data-key="ai.${i}.ai" aria-label="AI가 알려준 값"><span class="unit" data-unit="${i}"></span></div></td>
+          <td><div class="uwrap"><input type="text" maxlength="40" data-key="ai.${i}.ref" aria-label="자료의 값"><span class="unit" data-unit="${i}"></span></div></td>
+          <td data-tcell="${i}"><input type="text" inputmode="decimal" maxlength="8" data-key="ai.${i}.temp" placeholder="밀도일 때" aria-label="밀도를 잰 온도(℃)"></td>
           <td data-vcell="${i}"><select data-key="ai.${i}.verdict" aria-label="비교 결과">${optList(AI_VERDICTS)}</select></td>
-          <td><input type="text" maxlength="40" data-key="ai.${i}.src" placeholder="예: 교과서 40쪽" aria-label="확인한 곳"></td></tr>`;
+          <td><input type="text" maxlength="80" data-key="ai.${i}.src" placeholder="자료 이름·쪽·주소" aria-label="출처"></td></tr>`;
       }
       root.innerHTML = `<details class="card roles-card"><summary><b>👥 우리 모둠 역할 안내</b> <span class="muted">(눌러서 보기)</span></summary>${roleGuide()}${TYPE_NOTICE}</details>
       <div class="card">
         <h2><span class="num">1</span>물질의 특성을 조사해 표를 완성해요</h2>
         <p class="muted">파란 점선 칸이 우리 모둠이 조사할 칸이에요. 교과서 표, 과학 자료, 검색으로 찾아보세요.
-        <b>AI에게 물어봤다면 꼭 교과서나 과학 자료와 다시 맞춰 보세요.</b> (AI도 틀릴 수 있어요)</p>
+        <b>AI에게 물어봤다면 꼭 믿을 수 있는 과학 자료와 다시 맞춰 보세요.</b> (AI도 틀릴 수 있어요) 값은 <b>숫자만</b> 적고(단위는 자동으로 붙어요), <b>소수점 자릿수</b>는 자료에 나온 그대로 적어요. 밀도는 온도에 따라 달라지니 아래 AI 검증표에 온도도 적어요.</p>
         <div class="table-wrap"><table class="props"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
         <p class="muted" id="svProg" style="margin-top:8px"></p>
         ${TYPE_NOTICE}
@@ -351,11 +360,16 @@
       </div>
       <div class="card" id="aiCard">
         <h2>🤖 AI에게 물어보고 검증해요</h2>
-        <p class="muted">선생님이 허용한 AI 챗봇에게 위 표의 물질 특성을 물어보세요. AI의 답을 그대로 믿지 말고, <b>교과서나 과학 자료의 값과 비교</b>해서 같은지 다른지 기록해요.
+        <p class="muted">선생님이 허용한 AI 챗봇에게 위 표의 물질 특성을 물어보세요. AI의 답을 그대로 믿지 말고, <b>믿을 수 있는 과학 자료(과학 백과사전, 공공기관·대학 자료 등)의 값과 비교</b>해서 같은지 다른지 기록해요.
         다른 값을 찾았다면 AI의 오류를 찾아낸 거예요!</p>
+        <div class="typenote" style="margin:8px 0"><b>📝 값을 적을 때 꼭 지켜요</b><br>
+          ① 항목을 고르면 <b>단위(℃, g/cm³)가 칸 옆에 자동으로 나와요.</b> 값은 <b>숫자만</b> 적어요. (자료가 g/mL 로 되어 있어도 1 g/mL = 1 g/cm³ 라서 숫자는 그대로예요)<br>
+          ② <b>소수점 자릿수</b>는 자료에 나온 그대로 적어요. 자료마다 자릿수가 다르면 반올림해서 같은 자리까지 맞춰 비교해요. (예: 0.92 와 0.9194 → 소수 둘째 자리까지 0.92 로 같아요)<br>
+          ③ <b>밀도는 온도에 따라 달라져요.</b> 밀도를 적을 때는 온도(℃) 칸에 자료에 쓰인 온도(예: 20)를 꼭 적고, 온도가 다르면 값이 조금 달라도 '다르다'가 아니에요.<br>
+          ④ <b>출처</b> 칸에 자료 이름과 쪽수나 인터넷 주소를 꼭 적어요.</div>
         <div class="row" style="margin:8px 0"><button class="btn small" type="button" data-copy="${esc(promptExample)}">📋 AI에게 물어볼 질문 예시 복사</button>
           <span class="muted">예시를 그대로 써도 좋고, 우리 모둠 질문으로 바꿔도 좋아요.</span></div>
-        <div class="table-wrap"><table class="props aitab"><thead><tr><th>#</th><th>물질</th><th>항목</th><th>AI가 알려준 값</th><th>교과서·자료의 값</th><th>비교 결과</th><th>확인한 곳</th></tr></thead><tbody>${aiRows}</tbody></table></div>
+        <div class="table-wrap"><table class="props aitab"><thead><tr><th>#</th><th>물질</th><th>항목</th><th>AI가 알려준 값<br><small>(숫자만)</small></th><th>자료의 값<br><small>(숫자만)</small></th><th>온도(℃)<br><small>(밀도만)</small></th><th>비교 결과</th><th>출처 ✍️<br><small>(자료 이름·쪽·주소)</small></th></tr></thead><tbody>${aiRows}</tbody></table></div>
         <p class="muted" id="aiSum" style="margin-top:8px"></p>
         <label class="field frame" style="margin-top:12px"><span>AI를 써 보고 알게 된 점은? (AI의 장점, 조심할 점)</span>
           <textarea maxlength="800" data-key="ai.reflect" rows="3" style="width:100%;border:2px solid var(--ink);border-radius:10px;padding:10px 12px;background:#fff"></textarea></label>
@@ -389,6 +403,11 @@
       const cell = $(`[data-vcell="${i}"]`, root); if (!cell) continue;
       const vd = v.fields['ai.' + i + '.verdict'] || '';
       cell.classList.toggle('ok', vd === '같다'); cell.classList.toggle('bad', vd === '다르다');
+      const un = AI_UNITS[v.fields['ai.' + i + '.field']] || '';
+      $$(`[data-unit="${i}"]`, root).forEach(u => { u.textContent = un; });
+      $$(`[data-key="ai.${i}.ai"], [data-key="ai.${i}.ref"]`, root).forEach(inp => { inp.inputMode = un ? 'decimal' : 'text'; inp.placeholder = un ? '숫자만' : ''; });
+      const tc = $(`[data-tcell="${i}"] input`, root);
+      if (tc) { const dens = v.fields['ai.' + i + '.field'] === '밀도'; tc.disabled = !dens; tc.placeholder = dens ? '예: 20' : '밀도일 때'; }
     }
     const sm = aiSummary(v.fields);
     $('#aiSum').textContent = sm.n ? `AI 답변 검증 ${sm.n}건 · 다른 값을 찾은 것 ${sm.diff}건` : '아직 기록한 검증이 없어요.';
@@ -402,6 +421,7 @@
     funnel: '<path d="M10 4h12M16 4v3M9 8c0 11 3 15 7 16 4-1 7-5 7-16z" fill="#e8f1f6"/><path d="M16 24v4M13 28h6"/>',
     evaporate: '<path d="M5 22c3 7 19 7 22 0z" fill="#e5e7eb"/><path d="M11 17c2-2 0-4 2-6M17 17c2-2 0-4 2-6M23 17c2-2 0-4 2-6" />',
     distill: '<path d="M7 15 4 27h14l-3-12V8h-5v7z" fill="#e8f1f6"/><path d="M15 8h10v10M23 26h8v-6h-8z" fill="none"/>',
+    float: '<path d="M6 14h20v13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2z" fill="#dbeafe"/><circle cx="12" cy="10" r="3" fill="#f3f0e6"/><circle cx="20" cy="24" r="3" fill="#9ca3af"/>',
     cool: '<path d="M16 4v24M5 10l22 12M27 10 5 22" /><rect x="11" y="11" width="10" height="10" rx="2" fill="#dbeafe"/>'
   };
   const iconSvg = id => `<svg width="34" height="34" viewBox="0 0 34 34" fill="none" stroke="#1d2b2f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[id]}</svg>`;
@@ -448,13 +468,13 @@
       return `<button class="mix" data-act="mix" data-id="${id}" aria-pressed="${v.mixId === id}"><span class="lv">${m.level}</span><div class="ttl">${esc(m.title)}</div><div class="muted">${esc(m.desc)}</div><div class="tags">${m.focus.map(f => `<span class="tag">${f}</span>`).join('')}</div></button>`;
     };
     let mixes;
-    if (CFG.MIX_MODE === 'variant') {
-      const m = v.mix, own = startMixture();
-      mixes = `<div class="assigned"><span class="lv">${m.variant ? '우리 모둠 혼합물' : '연습용 혼합물'}</span><div class="ttl">${esc(m.title)}</div><div>${esc(m.desc)}</div>
+    if (isVariant()) {
+      const m = v.mix, ownSet = [E.variantFor(groupNo()), E.advFor(groupNo()), E.solFor(groupNo())];
+      mixes = `<div class="assigned"><span class="lv">${m.adv ? '심화 · ' : ''}${m.variant ? '우리 모둠 혼합물' : '연습용 혼합물'}</span><div class="ttl">${esc(m.title)}</div><div>${esc(m.desc)}</div>
         <div class="tags">${m.focus.map(f => `<span class="tag">${f}</span>`).join('')}</div>
-        <p class="muted" style="margin:6px 0 0">${m.variant ? '모둠마다 섞여 있는 물질은 달라요. 하지만 이용하는 특성(밀도·용해도·끓는점·녹는점)은 같아요. 발표 때 비교해 봐요!' : ''}</p></div>
+        <p class="muted" style="margin:6px 0 0">${m.variant ? `모둠마다 섞여 있는 물질은 달라요. 하지만 이용하는 특성(${m.focus.join('·')})과 쓰는 도구(${E.toolsOf(m.id).map(t => E.TOOLS[t].name).join('·')})는 같아요. 발표 때 비교해 봐요!` : ''}</p></div>
         <details class="othermix"><summary>다른 혼합물로 바꾸기 (선생님이 안내할 때만)</summary>
-        <div class="mixes">${Object.keys(E.MIXES).filter(id => E.MIXES[id].variant ? id === own : true).map(mixCard).join('')}</div></details>`;
+        <div class="mixes">${Object.keys(E.MIXES).filter(id => E.MIXES[id].variant ? ownSet.includes(id) : true).map(mixCard).join('')}</div></details>`;
     } else mixes = '<div class="mixes">' + Object.keys(E.MIXES).filter(id => !E.MIXES[id].variant).map(mixCard).join('') + '</div>';
     const tray = leaves.map(l => {
       const subs = E.subsOf(l), soln = l.comps.some(c => c.f === 'dissolved');
@@ -462,13 +482,14 @@
       return `<button class="smp ${S.sel.sample === l.id ? 'sel' : ''}" data-act="sample" data-id="${l.id}" aria-pressed="${S.sel.sample === l.id}">${badge}${beakerSVG(l)}<div class="lbl">${esc(l.label)}</div><div class="chips">${chipsOf(l)}</div></button>`;
     }).join('');
     const tempChips = S.sel.tool === 'cool' ? `<p style="margin:12px 0 6px;font-weight:800">몇 ℃의 물에서 식힐까요? <span class="muted" style="font-weight:400">(표의 녹는점과 비교해 봐요)</span></p><div class="props-pick">${E.COOL_TEMPS.map(t => `<button class="pp" data-act="temp" data-id="${t}" aria-pressed="${S.sel.temp === t}">${t} ℃</button>`).join('')}</div>` : '';
+    const liquidChips = S.sel.tool === 'float' ? `<p style="margin:12px 0 6px;font-weight:800">어떤 액체에 넣을까요? <span class="muted" style="font-weight:400">(두 고체의 밀도 사이인 액체를 골라요)</span></p><div class="props-pick">${E.LIQUID_IDS.map(l => `<button class="pp" data-act="liquid" data-id="${l}" aria-pressed="${S.sel.liquid === l}">${E.LIQUIDS[l].name} (밀도 ${E.LIQUIDS[l].dens.toFixed(2)})</button>`).join('')}</div>` : '';
     const tools = E.toolsOf(v.mixId).map(id => `<button class="tool" data-act="tool" data-id="${id}" aria-pressed="${S.sel.tool === id}">${iconSvg(id)}${E.TOOLS[id].name}</button>`).join('');
     const tdef = E.TOOLS[S.sel.tool];
     const help = tdef ? `<div class="tool-help"><b>${tdef.name} 사용법</b><br>${esc(tdef.use)}${tdef.safe ? `<div class="safe">⚠ 안전: ${esc(tdef.safe)}</div>` : ''}</div>` : '<div class="tool-help muted">도구를 고르면 사용법과 안전 수칙이 나와요.</div>';
-    const props = Object.keys(E.PROPS).map(k => `<button class="pp" data-act="prop" data-id="${k}" aria-pressed="${S.sel.prop === k}">${E.PROPS[k]}</button>`).join('');
+    const props = E.propsOf(v.mixId).map(k => `<button class="pp" data-act="prop" data-id="${k}" aria-pressed="${S.sel.prop === k}">${E.PROPS[k]}</button>`).join('');
     const smpSel = leaves.find(l => l.id === S.sel.sample);
-    const ready = smpSel && S.sel.tool && S.sel.prop && (S.sel.tool !== 'cool' || S.sel.temp);
-    const summary = `시료 <b>${smpSel ? esc(smpSel.label) : '?'}</b> + 도구 <b>${tdef ? tdef.name + (S.sel.tool === 'cool' ? (S.sel.temp ? ' (' + S.sel.temp + '℃)' : ' (온도 ?)') : '') : '?'}</b> + 이용할 특성 <b>${S.sel.prop ? E.PROPS[S.sel.prop] : '?'}</b>` +
+    const ready = smpSel && S.sel.tool && S.sel.prop && (S.sel.tool !== 'cool' || S.sel.temp) && (S.sel.tool !== 'float' || S.sel.liquid);
+    const summary = `시료 <b>${smpSel ? esc(smpSel.label) : '?'}</b> + 도구 <b>${tdef ? tdef.name + (S.sel.tool === 'cool' ? (S.sel.temp ? ' (' + S.sel.temp + '℃)' : ' (온도 ?)') : S.sel.tool === 'float' ? (S.sel.liquid ? ' (' + E.LIQUIDS[S.sel.liquid].name + ')' : ' (액체 ?)') : '') : '?'}</b> + 이용할 특성 <b>${S.sel.prop ? E.PROPS[S.sel.prop] : '?'}</b>` +
       (S.draftBy && S.draftBy !== S.name && (S.sel.sample || S.sel.tool || S.sel.prop) ? ` <span class="by">· ${esc(S.draftBy)}님이 고르는 중</span>` : '');
 
     // 결과 배너
@@ -526,13 +547,13 @@
     }).join('') + '</ul>' : '<p class="muted">아직 실행한 단계가 없어요.</p>';
 
     root.innerHTML = `
-      <div class="card"><h2><span class="num">1</span>${CFG.MIX_MODE === 'variant' ? '우리 모둠의 혼합물' : '분리할 혼합물을 골라요'}</h2>${mixes}
+      <div class="card"><h2><span class="num">1</span>${isVariant() ? '우리 모둠의 혼합물' : '분리할 혼합물을 골라요'}</h2>${mixes}
         <div class="row" style="margin-top:10px"><button class="btn small" data-act="undo" type="button" ${st.steps.length ? '' : 'disabled'}>↩ 한 단계 되돌리기</button><button class="btn small" data-act="reset" type="button">처음부터</button><span class="muted">혼합물을 바꾸면 모둠 모두의 화면이 처음부터 시작해요.</span></div></div>
       <div class="lab-grid"><div class="col">
         <div class="card"><h2><span class="num">2</span>시료 트레이 <span class="muted" style="font-weight:400">· 분리할 시료를 눌러 고르세요</span></h2><div class="tray">${tray}</div>${usedN ? `<p class="muted" style="margin-top:8px">사용을 마친 시료 ${usedN}개는 숨겼어요.</p>` : ''}</div>
         <div class="card"><h2><span class="num">3</span>도구와 이용할 특성을 골라 실행해요</h2>
           <div class="tools">${tools}</div>${help}
-          ${tempChips}<p style="margin:12px 0 6px;font-weight:800">이 단계에서 이용하는 물질의 특성은?</p><div class="props-pick">${props}</div>
+          ${tempChips}${liquidChips}<p style="margin:12px 0 6px;font-weight:800">이 단계에서 이용하는 물질의 특성은?</p><div class="props-pick">${props}</div>
           <div class="runbar"><div class="sel-summary">${summary}</div><button class="btn primary" data-act="run" type="button" ${ready ? '' : 'disabled'}>▶ 실험 실행</button></div>
           ${banner}</div>
       </div><div class="col">${coach}
@@ -546,12 +567,13 @@
     const act = b.dataset.act, id = b.dataset.id;
     if (act === 'sample') { S.sel.sample = S.sel.sample === id ? '' : id; queueDraft(); renderLab(); }
     else if (act === 'tool') { S.sel.tool = S.sel.tool === id ? '' : id; queueDraft(); renderLab(); }
+    else if (act === 'liquid') { S.sel.liquid = S.sel.liquid === id ? '' : id; queueDraft(); renderLab(); }
     else if (act === 'temp') { S.sel.temp = S.sel.temp === Number(id) ? 0 : Number(id); queueDraft(); renderLab(); }
     else if (act === 'prop') { S.sel.prop = S.sel.prop === id ? '' : id; queueDraft(); renderLab(); }
-    else if (act === 'run') { if (S.sel.sample && S.sel.tool && S.sel.prop && (S.sel.tool !== 'cool' || S.sel.temp)) send({ type: 'run', tool: S.sel.tool, input: S.sel.sample, prop: S.sel.prop, temp: S.sel.tool === 'cool' ? S.sel.temp : undefined }); }
+    else if (act === 'run') { if (S.sel.sample && S.sel.tool && S.sel.prop && (S.sel.tool !== 'cool' || S.sel.temp) && (S.sel.tool !== 'float' || S.sel.liquid)) send({ type: 'run', tool: S.sel.tool, input: S.sel.sample, prop: S.sel.prop, temp: S.sel.tool === 'cool' ? S.sel.temp : undefined, liquid: S.sel.tool === 'float' ? S.sel.liquid : undefined }); }
     else if (act === 'undo') send({ type: 'undo' });
     else if (act === 'reset') { if (confirm('모둠 전체의 실험을 처음부터 다시 시작할까요?')) { S.banner = null; send({ type: 'reset' }); } }
-    else if (act === 'mix') { if (id !== S.view.mixId && (S.view.state.steps.length === 0 && CFG.MIX_MODE !== 'variant' || confirm('혼합물을 바꾸면 모둠 전체가 처음부터 시작해요. 바꿀까요?'))) { S.banner = null; send({ type: 'mixture', id }); } }
+    else if (act === 'mix') { if (id !== S.view.mixId && (S.view.state.steps.length === 0 && !isVariant() || confirm('혼합물을 바꾸면 모둠 전체가 처음부터 시작해요. 바꿀까요?'))) { S.banner = null; send({ type: 'mixture', id }); } }
     else if (act === 'hint') send({ type: 'hint', key: S.view.key });
     else if (act === 'goframe') setTab('frame');
   });
@@ -559,7 +581,7 @@
   /* ---------- ③ 서술 정리 ---------- */
   let frameBuilt = false;
   const FRAME_FIELDS = [
-    ['order', '1. 분리 순서', '어떤 순서로 분리했나요? (예: ① 자석 → ② …)'],
+    ['order', '1. 분리 순서', '어떤 순서로 분리했나요? (예: ① 거름 장치 → ② …)'],
     ['prop', '2. 이용한 물질의 특성', '각 단계에서 어떤 특성의 차이를 이용했나요?'],
     ['tool', '3. 사용한 도구와 이유', '각 단계에서 어떤 도구를 왜 썼나요?'],
     ['result', '4. 분리되는 물질과 남는 물질', '각 단계에서 무엇이 분리되고 무엇이 남나요?'],
@@ -807,10 +829,35 @@
     } catch (er) { toast('댓글을 남기지 못했어요.'); }
   });
 
+  /* ---------- 교사용: 혼합물 전체 목록과 정답 ---------- */
+  function answerKeyHTML() {
+    const grpOf = (fn, id) => { const g = []; for (let n = 1; n <= 12; n++) if (fn(n) === id) g.push(n); return g; };
+    const sections = [
+      { title: '기본 혼합물 V (밀도·용해도·끓는점)', ids: E.VARIANT_IDS, fn: E.variantFor, mode: "MIX_MODE 'variant'" },
+      { title: '심화 혼합물 S (녹는점 추가)', ids: E.ADV_IDS, fn: E.advFor, mode: "MIX_MODE 'melting'" },
+      { title: '심화 혼합물 D (고체의 밀도차)', ids: E.SOL_IDS, fn: E.solFor, mode: "MIX_MODE 'solids'" },
+      { title: '연습용 혼합물 L (MIX_MODE \'fixed\')', ids: Object.keys(E.MIXES).filter(id => /^L/.test(id)), fn: null, mode: '' }
+    ];
+    const one = (id, grp) => {
+      const m = E.MIXES[id], subs = Array.from(new Set(m.comps.map(c => c.s)));
+      const FL = E.fieldsOf(m), sol = E.solution(id);
+      const state = c => c.f === 'dissolved' ? '녹아 있음' : c.f === 'liquid' ? '액체' : '고체';
+      const head = FL.map(f => `<th>${esc(f.label)}</th>`).join('');
+      const rows = subs.map(sid => `<tr><td class="name">${esc(E.SUBS[sid].name)}${m.comps.filter(c => c.s === sid).map(c => ' <span class="muted">(' + state(c) + ')</span>').join('').slice(0, 40)}</td>` + FL.map(f => `<td>${esc(String(E.showValue(sid, f.k)))}</td>`).join('') + '</tr>').join('');
+      const steps = sol ? sol.steps.map(st => `<li><b>${esc(st.tool)}</b> <span class="tag">${esc(st.prop)}</span> — ${esc(st.input)}<br><span class="muted">→ ${st.outs.map(esc).join(' / ')}</span>${st.alts.length ? `<br><span class="muted">가능한 선택: ${st.alts.map(esc).join(', ')}</span>` : ''}</li>`).join('') : '<li>경로를 찾지 못했어요.</li>';
+      return `<details class="card" style="margin:8px 0"><summary><b>${id}</b> · ${esc(Array.from(new Set(m.comps.map(c => E.SUBS[c.s].name))).join(' + '))}${grp ? ` <span class="tag">${grp.length ? grp.map(g => g + '모둠').join(', ') : '배정 없음'}</span>` : ''}${sol ? ` <span class="muted">· 최소 ${sol.steps.length}단계${sol.clean ? '' : '(주의 포함)'}</span>` : ''}</summary>
+        <div class="table-wrap"><table class="props"><thead><tr><th>물질</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
+        <p style="margin:8px 0 4px"><b>정답 분리 순서</b> <span class="muted">(주의할 점이 없는 최단 경로 1가지. 다른 순서도 가능할 수 있어요)</span></p><ol class="steps">${steps}</ol></details>`;
+    };
+    return `<h2>📚 학생에게 배부되는 혼합물 전체와 정답</h2><p class="muted">모둠 번호 1~12 기준 자동 배정입니다. 모둠 번호가 종류 수보다 크면 처음 혼합물로 돌아가요(예: V는 9모둠이 1번과 같음). 수행평가에는 이 목록과 다른 혼합물을 쓰길 권해요.</p>` +
+      sections.map(sec => `<details class="card" style="margin:10px 0"><summary><b>${esc(sec.title)}</b> <span class="muted">${sec.ids.length}종${sec.mode ? ' · ' + esc(sec.mode) : ''}</span></summary>${sec.ids.map(id => one(id, sec.fn ? grpOf(sec.fn, id) : null)).join('')}</details>`).join('');
+  }
+
   /* ---------- 교사용 ---------- */
   let tTimer = null;
   function buildTeacher() {
     showScreen('teacher');
+    if (!$('#tKey')) { const d = document.createElement('div'); d.className = 'card'; d.id = 'tKey'; d.innerHTML = answerKeyHTML(); $('#screenTeacher').appendChild(d); }
     $('#tCls').value = store.get('ssl:tcls') || '';
     const go = async () => {
       const cls = keyOf($('#tCls').value); if (!cls) return;
@@ -831,7 +878,7 @@
               <div class="progress">${ev.need.map(s => `<span class="prog ${ev.recovered.includes(s) ? 'ok' : ''}">${ev.recovered.includes(s) ? '✓ ' : ''}${E.SUBS[s].name}</span>`).join('')}</div>
               <div style="margin:6px 0">${esc(path)}</div>
               <div class="kv">단계 ${ev.steps} · 실패 ${v.stats.fails} · 되돌리기 ${v.stats.undos} · 힌트 ${v.hints.used}/${v.hints.limit} · 특성 선택 오류 ${ev.badProp} · 주의 ${ev.warnCount}</div>
-              ${(() => { const a = aiSummary(v.fields); return `<div class="kv">🤖 AI 답변 검증 ${a.n}건 · 다른 값 발견 ${a.diff}건</div>` + a.items.slice(0, 2).map(r => `<div class="kv">· ${esc(r.sub)} ${esc(r.field)}: AI '${esc(r.ai)}' ↔ 자료 '${esc(r.ref)}'</div>`).join(''); })()}
+              ${(() => { const a = aiSummary(v.fields); return `<div class="kv">🤖 AI 답변 검증 ${a.n}건 · 다른 값 발견 ${a.diff}건</div>` + a.items.slice(0, 2).map(r => `<div class="kv">· ${esc(r.sub)} ${esc(r.field)}: AI '${esc(aiVal(r, 'ai'))}' ↔ 자료 '${esc(aiVal(r, 'ref'))}'${r.temp ? ' (' + esc(r.temp) + '℃)' : ''}${r.src ? ' · 출처 ' + esc(r.src) : ''}</div>`).join(''); })()}
               <div class="kv">접속: ${(rm.presence || []).map(p => esc(p.name) + (p.role ? '(' + esc(p.role) + ')' : '')).join(', ') || '없음'} · 마지막 활동 ${ago}</div>
               <div class="kv">${ev.done ? '✅ 분리 완료' : '⏳ 진행 중'}</div></div>`;
           }).join('') || '<p class="muted">아직 입장한 모둠이 없어요.</p>';

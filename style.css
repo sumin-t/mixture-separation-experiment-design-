@@ -185,7 +185,7 @@ footer { text-align: center; padding: 18px 12px 22px; font-size: .85rem; color: 
 .top .btn { color: var(--ink); min-height: 34px; padding: 3px 12px; }
 
 /* AI 답변 검증 표 */
-.aitab { min-width: 760px; }
+.aitab { min-width: 1000px; }
 .aitab td { padding: 6px; }
 .aitab td.ok select { border-style: solid; border-color: var(--green); background: var(--green-bg); }
 .aitab td.bad select { border-style: solid; border-color: var(--amber); background: var(--amber-bg); }
@@ -260,3 +260,7 @@ input, select, textarea { font-size: max(16px, 1em); }   /* 입력 칸을 눌러
 
 .padlets { margin-top: 12px; }
 .padbtn { flex: 1 1 110px; }
+
+.uwrap { display: flex; align-items: center; gap: 4px; }
+.uwrap .unit { font-weight: 800; white-space: nowrap; color: var(--ink); min-width: 0; }
+.uwrap input { min-width: 60px; flex: 1; }

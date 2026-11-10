@@ -2,7 +2,7 @@
 window.SSL_CONFIG = {
   // Apps Script 웹 앱 URL (끝이 /exec). 비워 두면 '이 기기(브라우저)' 안에서만 동작합니다.
   // 비워 둔 상태에서도 같은 브라우저의 다른 탭끼리는 동기화되므로 미리 시험해 볼 수 있어요.
-  BACKEND_URL: 'https://script.google.com/macros/s/AKfycbxd3Yu8EGq4V-4sm7Ec8znJP6FUgshigefSn_Lm0PWmaxzLeXRPd67rTR-QbT5rkkJRSA/exec',
+  BACKEND_URL: 'https://script.google.com/macros/s/AKfycbwsPlIVXIKoUZg4I0gJoMMTc0lTTsbp4q_PU5H1MWqHND0vCIHvfohgRAXGRrpKREPc9g/exec',
 
   // 패들렛 보드 주소 (예: https://padlet.com/내계정/보드이름). 비워 두면 패들렛 메인 페이지가 열립니다.
   PADLET_URL: '',
@@ -18,7 +18,13 @@ window.SSL_CONFIG = {
     6: 'https://padlet.com/t223ontool4/2026-b-206-h5h8rtjd515t88dl'
   },
 
-  // 혼합물 배정: 'variant' = 모둠 번호에 따라 8가지 혼합물을 자동 배정(특성·난이도 동일), 'fixed' = 모두 같은 혼합물(FIXED_MIXTURE)
+
+
+  // 혼합물 배정 (모둠 번호에 따라 자동 배정, 같은 종류끼리는 특성·난이도가 같음)
+  //  'variant' = 기본 혼합물 8종 (밀도·용해도·끓는점 / 분별 깔때기·거름 장치·증류 장치)
+  //  'melting' = 심화 혼합물 8종 (+ 녹는점: 식혀서 굳히기)
+  //  'solids'  = 심화 고체 혼합물 6종 (고체의 밀도차: 중간 밀도 액체에 넣어 뜨고 가라앉히기)
+  //  'fixed'   = 모두 같은 연습용 혼합물(FIXED_MIXTURE)
   MIX_MODE: 'variant',
   FIXED_MIXTURE: 'L2',
 
