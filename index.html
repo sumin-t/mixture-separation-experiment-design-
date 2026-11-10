@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>혼합물 분리 설계실 | 수민T의 과학 실험실</title>
+<meta name="description" content="물질의 특성을 이용해 모둠이 함께 혼합물 분리 실험을 설계하고 가상으로 수행해 보는 웹앱">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="#f5f1e8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3h8M12 3v8l-6 11a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-6-11V3"/><path d="M8.5 18h11"/></svg>
+    <div>혼합물 분리 설계실<div class="sub">수민T의 과학 실험실 · 중2 물질의 특성</div></div>
+  </div>
+  <div class="top-right" id="topRight"></div>
+</header>
+
+<main id="main">
+
+  <!-- 입장 -->
+  <section id="screenJoin" class="join card hidden">
+    <h1>모둠 입장</h1>
+    <p class="muted">같은 <b>반</b>과 <b>모둠</b> 숫자를 입력한 사람은 <b>같은 화면</b>을 함께 보고 입력해요. (예: 2반 3모둠 → 반 <b>2-3</b>, 모둠 <b>3</b>)</p>
+    <form id="joinForm" autocomplete="off">
+      <label class="field"><span>반 (학년-반 숫자, 예: 2-3)</span><input type="text" id="jCls" maxlength="12" required placeholder="2-3" inputmode="text"></label>
+      <label class="field"><span>모둠 (숫자, 예: 3)</span><input type="text" id="jRoom" maxlength="12" required placeholder="3" inputmode="numeric"></label>
+      <label class="field"><span>내 이름(별명이나 번호도 좋아요)</span><input type="text" id="jName" maxlength="8" required placeholder="예: 지우"></label>
+      <div class="field"><span>내 역할 (한 모둠에 여러 기기가 있을 때 나누어 맡아요)</span>
+        <div class="roles" id="roles"></div>
+      </div>
+      <button class="btn primary" type="submit" style="width:100%">실험실 입장</button>
+    </form>
+    <p class="notice" style="margin-top:14px">개인정보는 입력하지 말고 별명이나 번호를 사용하세요.</p>
+    <p class="muted" style="margin-top:10px"><a href="?teacher=1" id="teacherLink">교사용 화면</a></p>
+  </section>
+
+  <!-- 앱 -->
+  <section id="screenApp" class="hidden">
+    <div class="tabs" role="tablist" id="tabs">
+      <button class="tab" role="tab" data-tab="survey">① 특성 조사</button>
+      <button class="tab" role="tab" data-tab="lab">② 설계·실험</button>
+      <button class="tab" role="tab" data-tab="frame">③ 서술 정리</button>
+      <button class="tab" role="tab" data-tab="share">④ 공유하기</button>
+    </div>
+    <div id="panelSurvey" role="tabpanel"></div>
+    <div id="panelLab" role="tabpanel" class="hidden"></div>
+    <div id="panelFrame" role="tabpanel" class="hidden"></div>
+    <div id="panelShare" role="tabpanel" class="hidden"></div>
+  </section>
+
+  <!-- 교사 -->
+  <section id="screenTeacher" class="hidden">
+    <div class="card">
+      <h2>교사용 대시보드</h2>
+      <div class="row">
+        <label class="field" style="margin:0"><span>반</span><input type="text" id="tCls" maxlength="12" placeholder="2-3"></label>
+        <button class="btn primary" id="tGo" style="align-self:flex-end">불러오기</button>
+        <span class="muted" id="tInfo" style="align-self:flex-end"></span>
+      </div>
+      <div class="tgrid" id="tGrid"></div>
+    </div>
+  </section>
+</main>
+
+<footer>©수민T의 과학 실험실. All rights reserved.</footer>
+
+<script src="config.js"></script>
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
