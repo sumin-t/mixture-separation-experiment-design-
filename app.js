@@ -28,17 +28,28 @@
   }
 
   /* ---------- 네트워크 계층 ---------- */
+  async function readJson(r) {
+    const t = await r.text();
+    try { return JSON.parse(t); }
+    catch (e) { const er = new Error('NOT_JSON:' + r.status + ':' + t.slice(0, 80).replace(/\s+/g, ' ')); er.notJson = true; throw er; }
+  }
+  const whyFail = e => {
+    const m = String((e && e.message) || e);
+    if (e && e.notJson) return '서버가 데이터가 아닌 화면(로그인·오류 페이지)을 돌려줬어요. 배포의 "액세스 권한: 모든 사용자"와 웹 앱 주소(/exec)를 확인하세요.';
+    if (e && e.name === 'TypeError' && /fetch|network|load/i.test(m)) return '서버에 연결하지 못했어요. BACKEND_URL 주소(끝이 /exec)와 인터넷 연결을 확인하세요.';
+    if (e && e.server) return '서버 오류: ' + m + ' — Apps Script가 구글 시트의 [확장 프로그램 > Apps Script]에서 만든 것인지, 새 버전으로 배포했는지 확인하세요.';
+    if (e && e.name === 'TypeError') return '앱 파일 오류(' + m + '). app.js와 engine.js가 둘 다 새 버전인지, 강력 새로고침을 했는지 확인하세요.';
+    return '서버 응답: ' + m;
+  };
   class RemoteNet {
     constructor(url) { this.url = url; this.mode = 'remote'; }
     async get(params) {
       const u = new URL(this.url);
       Object.keys(params).forEach(k => u.searchParams.set(k, params[k]));
-      const r = await fetch(u.toString());
-      return r.json();
+      return readJson(await fetch(u.toString()));
     }
     async post(body) {
-      const r = await fetch(this.url, { method: 'POST', body: JSON.stringify(body) });
-      return r.json();
+      return readJson(await fetch(this.url, { method: 'POST', body: JSON.stringify(body) }));
     }
     join(c) { return this.post({ action: 'join', cls: c.cls, room: c.room, cid: c.cid, name: c.name, role: c.role }); }
     poll(c, since, dv) { return this.get({ action: 'poll', cls: c.cls, room: c.room, cid: c.cid, name: c.name, role: c.role, since, dv }); }
@@ -127,10 +138,10 @@
   const roleGuide = () => '<div class="roleguide">' + ROLES.map(r => `<div><b>${r.id}</b> <span class="muted">${r.desc}</span><ul>${r.tasks.map(t => `<li>${t}</li>`).join('')}</ul></div>`).join('') + '</div>';
   const TYPE_NOTICE = '<p class="notice typenote">✍ <b>글은 한 칸에 한 명씩 입력해요.</b> 같은 칸을 두 사람이 동시에 쓰면 나중에 저장된 글만 남고 먼저 쓴 글은 사라져요. 입력할 사람을 정하고, 나머지는 화면을 보며 말로 도와주세요. (역할은 안내용이라 누구나 모든 칸을 쓸 수 있어요.)</p>';
 
-  function toast(msg) {
+  function toast(msg, ms) {
     const old = $('.toast'); if (old) old.remove();
     const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = msg;
-    document.body.appendChild(t); setTimeout(() => t.remove(), 3200);
+    document.body.appendChild(t); setTimeout(() => t.remove(), ms || 3200);
   }
 
   /* ---------- 동기화 ---------- */
@@ -241,7 +252,7 @@
     if (S.net.mode === 'local') S.net.onChange = () => pollOnce();
     try {
       const r = await S.net.join(ctx());
-      if (!r || !r.ok) throw new Error((r && r.error) || 'join failed');
+      if (!r || !r.ok) throw Object.assign(new Error((r && r.error) || '응답 없음'), { server: true });
       setOnline(true);
       showScreen('app');
       applyPayload(r);
@@ -249,7 +260,8 @@
       if (!S.view) recompute();
       renderHeader(); setTab('survey'); schedulePoll();
     } catch (e) {
-      toast('입장에 실패했어요. 주소(BACKEND_URL)나 네트워크를 확인해 주세요.');
+      console.error('입장 실패', e);
+      toast('입장에 실패했어요. ' + whyFail(e), 9000);
     }
   }
   function leave() {
