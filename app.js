@@ -1,7 +1,7 @@
 /* 혼합물 분리 설계실 - 화면 로직 */
 (function () {
   'use strict';
-  const CFG = Object.assign({ BACKEND_URL: '', PADLET_URL: '', PADLET_URLS: {}, HINT_LIMIT: 3, POLL_MS: 3000, POLL_IDLE_MS: 7000, MIX_MODE: 'variant', FIXED_MIXTURE: 'L2' }, window.SSL_CONFIG || {});
+  const CFG = Object.assign({ BACKEND_URL: '', PADLET_URL: '', PADLET_URLS: {}, HINT_LIMIT: 3, POLL_MS: 3000, POLL_IDLE_MS: 7000, MIX_MODE: 'variant', FIXED_MIXTURE: 'L2', GROUPS: 6 }, window.SSL_CONFIG || {});
   const E = window.Engine;
   const $ = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
@@ -122,7 +122,7 @@
     cls: '', room: '', roomLabel: '', name: '', role: '', cid: sessionId(),
     events: [], seq: 0, dv: -1, draft: {}, presence: [], view: null,
     sel: { sample: '', tool: '', prop: '', temp: 0, liquid: '' }, selAt: 0, draftBy: '',
-    tab: 'survey', banner: null, shownLog: 0, lastActive: Date.now(), net: null,
+    tab: 'lab', mode: 'practice', cur: '', mainCtx: '', last: {}, banner: null, shownLog: 0, lastActive: Date.now(), net: null,
     online: true, polling: false, pollTimer: null, draftTimer: null, gallery: null
   };
   const solveCache = {};
@@ -148,7 +148,7 @@
   function recompute() {
     const hadView = !!S.view;
     const prevLen = hadView ? S.view.log.length : 0;
-    S.view = E.replay(S.events, { hintLimit: CFG.HINT_LIMIT });
+    S.view = E.replay(S.events, { hintLimit: CFG.HINT_LIMIT, ctx: S.cur, mainCtx: S.mainCtx });
     const v = S.view;
     if (v.log.length !== prevLen) {
       if (hadView && v.log.length > prevLen) S.banner = v.log[v.log.length - 1];   // 새 실행 결과(내 기기·다른 기기 모두)
@@ -157,11 +157,33 @@
     }
   }
   const groupNo = () => String(S.room).split('-')[0];
-  const isVariant = () => CFG.MIX_MODE !== 'fixed';
-  const startMixture = () => {
-    const n = groupNo(), id = CFG.MIX_MODE === 'melting' ? E.advFor(n) : CFG.MIX_MODE === 'solids' ? E.solFor(n) : CFG.MIX_MODE === 'variant' ? E.variantFor(n) : '';
+  const mainFor = n => {
+    const id = CFG.MIX_MODE === 'melting' ? E.advFor(n) : CFG.MIX_MODE === 'solids' ? E.solFor(n) : CFG.MIX_MODE === 'variant' ? E.variantFor(n) : '';
     return E.MIXES[id] ? id : (E.MIXES[CFG.FIXED_MIXTURE] ? CFG.FIXED_MIXTURE : 'L2');
   };
+  const startMixture = () => mainFor(groupNo());
+  // 활동별 혼합물: 연습 = 연습용 3개, 기본 = 모둠 배정 1개, 심화 = 모둠 번호로 배정되는 심화 2개
+  const ctxList = mode => mode === 'practice' ? E.PRACTICE_IDS : mode === 'adv' ? [E.advFor(groupNo()), E.solFor(groupNo())] : [S.mainCtx];
+  const MODES = [
+    { id: 'practice', label: '🎯 연습', tabs: { lab: '① 설계·실험', frame: '② 설계안 쓰기' },
+      hint: '연습용 혼합물 3개로 설계안 쓰는 방법을 먼저 연습해요. 물질의 특성표가 제공돼요. 연습이 끝나면 ‘기본 활동’으로 가요.' },
+    { id: 'main', label: '📋 기본 활동', tabs: { survey: '① 특성 조사', lab: '② 설계·실험', frame: '③ 서술 정리', share: '④ 공유하기' },
+      hint: '우리 모둠 혼합물로 특성 조사 → 설계·실험 → 서술 정리 → 공유하기를 해요.' },
+    { id: 'adv', label: '🚀 심화', tabs: { lab: '① 설계·실험', frame: '② 설계안 쓰기' },
+      hint: '빨리 끝난 모둠을 위한 활동이에요. 특성은 표로 제공되니 바로 설계해 보세요. (녹는점·고체의 밀도차까지!)' }
+  ];
+  const doneIn = id => E.replay(S.events, { hintLimit: CFG.HINT_LIMIT, ctx: id, mainCtx: S.mainCtx }).eval.done;
+  function useMode(mode, id) {
+    const sameMode = S.mode === mode && !!S.view;
+    S.mode = mode;
+    const list = ctxList(mode);
+    S.cur = list.includes(id) ? id : (list.includes(S.last[mode]) ? S.last[mode] : list[0]);
+    S.last[mode] = S.cur;
+    S.view = null; S.banner = null; S.sel = { sample: '', tool: '', prop: '', temp: 0, liquid: '' };
+    recompute();
+    const allowed = Object.keys(MODES.find(m => m.id === mode).tabs);
+    setTab(sameMode && allowed.includes(S.tab) ? S.tab : allowed[0]);
+  }
 
   function applyPayload(resp) {
     if (!resp || !resp.ok) return false;
@@ -178,6 +200,7 @@
     if (resp.draft !== undefined && Date.now() - S.selAt > 1500) {
       S.dv = resp.dv;
       const d = resp.draft || {};
+      if (d.ctx && d.ctx !== S.cur) d.tool = d.sample = d.prop = d.liquid = '';   // 다른 혼합물 화면에서 고른 임시 선택은 무시
       const nd = { sample: d.sample || '', tool: d.tool || '', prop: d.prop || '', temp: Number(d.temp) || 0, liquid: d.liquid || '' };
       if (nd.sample !== S.sel.sample || nd.tool !== S.sel.tool || nd.prop !== S.sel.prop || nd.temp !== S.sel.temp || nd.liquid !== S.sel.liquid) { S.sel = nd; draftChanged = true; S.lastActive = Date.now(); }
       S.draftBy = d.by || '';
@@ -189,7 +212,7 @@
   }
 
   async function send(ev) {
-    ev.who = S.name;
+    ev.who = S.name; if (!ev.ctx) ev.ctx = S.cur;
     try {
       const r = await S.net.event(ctx(), ev, S.seq, S.dv);
       if (!r.ok) throw new Error(r.error || 'error');
@@ -222,7 +245,7 @@
     S.selAt = Date.now(); S.lastActive = Date.now();
     clearTimeout(S.draftTimer);
     S.draftTimer = setTimeout(() => {
-      S.net.draft(ctx(), { tool: S.sel.tool, sample: S.sel.sample, prop: S.sel.prop, temp: S.sel.temp || 0, liquid: S.sel.liquid || '', by: S.name }).catch(() => {});
+      S.net.draft(ctx(), { tool: S.sel.tool, sample: S.sel.sample, prop: S.sel.prop, temp: S.sel.temp || 0, liquid: S.sel.liquid || '', ctx: S.cur, by: S.name }).catch(() => {});
     }, 250);
   }
 
@@ -256,9 +279,9 @@
       setOnline(true);
       showScreen('app');
       applyPayload(r);
-      if (!S.events.some(e => e.type === 'mixture' || e.type === 'run')) await send({ type: 'mixture', id: startMixture(), ifEmpty: true });
-      if (!S.view) recompute();
-      renderHeader(); setTab('survey'); schedulePoll();
+      S.mainCtx = startMixture(); S.last = {};
+      buildModes(); useMode('practice');
+      renderHeader(); schedulePoll();
     } catch (e) {
       console.error('입장 실패', e);
       toast('입장에 실패했어요. ' + whyFail(e), 9000);
@@ -287,9 +310,19 @@
   }
 
   /* ---------- 탭 ---------- */
+  function buildModes() {
+    let el = $('#modes');
+    if (!el) { el = document.createElement('div'); el.id = 'modes'; el.className = 'modes'; el.setAttribute('role', 'tablist'); $('#tabs').before(el);
+      const h = document.createElement('p'); h.id = 'modeHint'; h.className = 'modehint muted'; $('#tabs').before(h);
+      el.addEventListener('click', e => { const b = e.target.closest('[data-mode]'); if (b && S.view) useMode(b.dataset.mode); }); }
+    el.innerHTML = MODES.map(m => `<button class="mode" role="tab" data-mode="${m.id}">${m.label}</button>`).join('');
+  }
   function setTab(t) {
     S.tab = t;
-    $$('#tabs .tab').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t));
+    const md = MODES.find(m => m.id === S.mode);
+    $$('#modes .mode').forEach(b => b.setAttribute('aria-selected', b.dataset.mode === S.mode));
+    const mh = $('#modeHint'); if (mh) mh.textContent = md.hint;
+    $$('#tabs .tab').forEach(b => { const lab = md.tabs[b.dataset.tab]; b.classList.toggle('hidden', !lab); if (lab) b.textContent = lab; b.setAttribute('aria-selected', b.dataset.tab === t); });
     ['Survey', 'Lab', 'Frame', 'Share'].forEach(n => $('#panel' + n).classList.toggle('hidden', n.toLowerCase() !== t));
     surveyBuiltFor = ''; frameBuilt = false;
     render();
@@ -475,19 +508,14 @@
     const v = S.view, st = v.state, ev = v.eval, root = $('#panelLab');
     const leaves = st.samples.filter(s => !s.used), usedN = st.samples.length - leaves.length;
     if (S.sel.sample && !leaves.find(l => l.id === S.sel.sample)) S.sel.sample = '';
-    const mixCard = id => {
-      const m = E.MIXES[id];
-      return `<button class="mix" data-act="mix" data-id="${id}" aria-pressed="${v.mixId === id}"><span class="lv">${m.level}</span><div class="ttl">${esc(m.title)}</div><div class="muted">${esc(m.desc)}</div><div class="tags">${m.focus.map(f => `<span class="tag">${f}</span>`).join('')}</div></button>`;
-    };
-    let mixes;
-    if (isVariant()) {
-      const m = v.mix, ownSet = [E.variantFor(groupNo()), E.advFor(groupNo()), E.solFor(groupNo())];
-      mixes = `<div class="assigned"><span class="lv">${m.adv ? '심화 · ' : ''}${m.variant ? '우리 모둠 혼합물' : '연습용 혼합물'}</span><div class="ttl">${esc(m.title)}</div><div>${esc(m.desc)}</div>
+    const m = v.mix, isMain = S.mode === 'main';
+    const FLD = E.fieldsOf(m), subsAll = Array.from(new Set(m.comps.map(c => c.s)));
+    const propTable = isMain ? '' : `<details class="othermix" open><summary>📋 물질의 특성표 (제공)</summary><div class="table-wrap"><table class="props"><thead><tr><th>물질</th>${FLD.map(f => `<th>${esc(f.label)}</th>`).join('')}</tr></thead><tbody>${subsAll.map(sid => `<tr><td class="name">${esc(E.SUBS[sid].name)}</td>${FLD.map(f => `<td>${esc(String(E.showValue(sid, f.k)))}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`;
+    const chips = isMain ? '' : `<div class="ctxbar">${ctxList(S.mode).map(id => `<button class="ctx" data-act="ctx" data-id="${id}" aria-pressed="${id === v.mixId}">${doneIn(id) ? '✅ ' : ''}${esc(E.MIXES[id].title)}</button>`).join('')}</div>`;
+    const lvTxt = S.mode === 'practice' ? '연습용 혼합물' : S.mode === 'adv' ? '심화 혼합물' : '우리 모둠 혼합물';
+    const mixes = chips + `<div class="assigned"><span class="lv">${lvTxt}</span><div class="ttl">${esc(m.title)}</div><div>${esc(m.desc)}</div>
         <div class="tags">${m.focus.map(f => `<span class="tag">${f}</span>`).join('')}</div>
-        <p class="muted" style="margin:6px 0 0">${m.variant ? `모둠마다 섞여 있는 물질은 달라요. 하지만 이용하는 특성(${m.focus.join('·')})과 쓰는 도구(${E.toolsOf(m.id).map(t => E.TOOLS[t].name).join('·')})는 같아요. 발표 때 비교해 봐요!` : ''}</p></div>
-        <details class="othermix"><summary>다른 혼합물로 바꾸기 (선생님이 안내할 때만)</summary>
-        <div class="mixes">${Object.keys(E.MIXES).filter(id => E.MIXES[id].variant ? ownSet.includes(id) : true).map(mixCard).join('')}</div></details>`;
-    } else mixes = '<div class="mixes">' + Object.keys(E.MIXES).filter(id => !E.MIXES[id].variant).map(mixCard).join('') + '</div>';
+        ${isMain && m.variant ? `<p class="muted" style="margin:6px 0 0">모둠마다 섞여 있는 물질은 달라요. 하지만 이용하는 특성(${m.focus.join('·')})과 쓰는 도구(${E.toolsOf(m.id).map(t => E.TOOLS[t].name).join('·')})는 같아요. 발표 때 비교해 봐요!</p>` : ''}</div>${propTable}`;
     const tray = leaves.map(l => {
       const subs = E.subsOf(l), soln = l.comps.some(c => c.f === 'dissolved');
       const badge = subs.length === 1 && !soln ? '<span class="badge-pure">순물질</span>' : soln && subs.length === 1 ? '<span class="badge-soln">용액</span>' : '';
@@ -539,7 +567,7 @@
       else lines.push(`✅ 모든 물질을 분리했어요. ${ev.steps}단계예요. 더 짧은 경로(${sol.minSteps}단계)도 있으니 순서를 바꿔 볼까요?`);
       if (ev.warnCount) lines.push(`⚠ 안전·안정성 주의가 ${ev.warnCount}번 있었어요.` + (sol.minCleanSteps ? ` 주의 없이 하는 경로는 최소 ${sol.minCleanSteps}단계예요.` : ''));
       if (ev.badProp) lines.push(`이용한 특성을 잘못 고른 단계가 ${ev.badProp}개 있어요. 서술형에서는 '어떤 특성의 차이'인지가 중요해요.`);
-      verdict = `<div class="verdict good">${lines.join('<br>')}<div class="row" style="margin-top:8px"><button class="btn small" data-act="goframe" type="button">③ 서술 정리로 이동</button></div></div>`;
+      verdict = `<div class="verdict good">${lines.join('<br>')}<div class="row" style="margin-top:8px"><button class="btn small" data-act="goframe" type="button">${S.mode === 'main' ? '③ 서술 정리로 이동' : '② 설계안 쓰기로 이동'}</button></div></div>`;
     } else if (v.stats.runs > 0) {
       const lostT = ev.lost.length ? ` ${ev.lost.map(s => names[s].name).join(', ')}은(는) 증발해 사라졌어요. 모으려면 어떻게 해야 할까요?` : '';
       verdict = `<div class="verdict mid">아직 얻지 못한 물질: <b>${ev.missing.map(s => names[s].name).join(', ')}</b>.${lostT}</div>`;
@@ -559,8 +587,8 @@
     }).join('') + '</ul>' : '<p class="muted">아직 실행한 단계가 없어요.</p>';
 
     root.innerHTML = `
-      <div class="card"><h2><span class="num">1</span>${isVariant() ? '우리 모둠의 혼합물' : '분리할 혼합물을 골라요'}</h2>${mixes}
-        <div class="row" style="margin-top:10px"><button class="btn small" data-act="undo" type="button" ${st.steps.length ? '' : 'disabled'}>↩ 한 단계 되돌리기</button><button class="btn small" data-act="reset" type="button">처음부터</button><span class="muted">혼합물을 바꾸면 모둠 모두의 화면이 처음부터 시작해요.</span></div></div>
+      <div class="card"><h2><span class="num">1</span>${S.mode === 'practice' ? '연습할 혼합물을 골라요' : S.mode === 'adv' ? '심화 혼합물을 골라요' : '우리 모둠의 혼합물'}</h2>${mixes}
+        <div class="row" style="margin-top:10px"><button class="btn small" data-act="undo" type="button" ${st.steps.length ? '' : 'disabled'}>↩ 한 단계 되돌리기</button><button class="btn small" data-act="reset" type="button">처음부터</button><span class="muted">‘처음부터’는 지금 혼합물의 실험만 다시 시작해요.</span></div></div>
       <div class="lab-grid"><div class="col">
         <div class="card"><h2><span class="num">2</span>시료 트레이 <span class="muted" style="font-weight:400">· 분리할 시료를 눌러 고르세요</span></h2><div class="tray">${tray}</div>${usedN ? `<p class="muted" style="margin-top:8px">사용을 마친 시료 ${usedN}개는 숨겼어요.</p>` : ''}</div>
         <div class="card"><h2><span class="num">3</span>도구와 이용할 특성을 골라 실행해요</h2>
@@ -585,7 +613,7 @@
     else if (act === 'run') { if (S.sel.sample && S.sel.tool && S.sel.prop && (S.sel.tool !== 'cool' || S.sel.temp) && (S.sel.tool !== 'float' || S.sel.liquid)) send({ type: 'run', tool: S.sel.tool, input: S.sel.sample, prop: S.sel.prop, temp: S.sel.tool === 'cool' ? S.sel.temp : undefined, liquid: S.sel.tool === 'float' ? S.sel.liquid : undefined }); }
     else if (act === 'undo') send({ type: 'undo' });
     else if (act === 'reset') { if (confirm('모둠 전체의 실험을 처음부터 다시 시작할까요?')) { S.banner = null; send({ type: 'reset' }); } }
-    else if (act === 'mix') { if (id !== S.view.mixId && (S.view.state.steps.length === 0 && !isVariant() || confirm('혼합물을 바꾸면 모둠 전체가 처음부터 시작해요. 바꿀까요?'))) { S.banner = null; send({ type: 'mixture', id }); } }
+    else if (act === 'ctx') { if (id !== S.view.mixId) useMode(S.mode, id); }
     else if (act === 'hint') send({ type: 'hint', key: S.view.key });
     else if (act === 'goframe') setTab('frame');
   });
@@ -605,8 +633,9 @@
     if (!frameBuilt) {
       frameBuilt = true;
       const chk = JSON.parse(store.get('ssl:chk') || '{}');
-      root.innerHTML = `<div class="card frame"><h2><span class="num">3</span>서술형 답안 틀로 정리해요</h2>
-        <p class="muted">다음 시간에는 <b>혼자서, 앱 없이</b> 실험을 설계해 서술해요. 아래 다섯 칸을 내 말로 쓸 수 있으면 준비 완료예요.</p>
+      const isMain = S.mode === 'main';
+      root.innerHTML = `<div class="card frame"><h2><span class="num">${isMain ? 3 : 2}</span>${isMain ? '서술형 답안 틀로 정리해요' : (S.mode === 'practice' ? '설계안 쓰기 연습 · ' : '심화 설계안 · ') + esc(v.mix.title)}</h2>
+        <p class="muted">${isMain ? '다음 시간에는' : '연습이니 편하게 써 봐요. 기본 활동에서도 같은 틀로 정리하니까 다음 시간에는'} <b>혼자서, 앱 없이</b> 실험을 설계해 서술해요. 아래 다섯 칸을 내 말로 쓸 수 있으면 준비 완료예요.</p>
         ${TYPE_NOTICE}
         <div class="row"><button class="btn small" id="fillDraft" type="button">내 설계로 초안 채우기</button><span class="muted">비어 있는 칸 1~4번만 채워 줘요. 모둠 모두에게 공유돼요.</span></div>
         ${FRAME_FIELDS.map(f => `<label><span>${f[1]}</span><textarea maxlength="1500" data-key="frame.${f[0]}" placeholder="${f[2]}"></textarea></label>`).join('')}</div>
@@ -623,7 +652,8 @@
     root.addEventListener('input', e => {
       const el = e.target.closest('textarea[data-key]'); if (!el) return;
       clearTimeout(timers[el.dataset.key]);
-      timers[el.dataset.key] = setTimeout(() => send({ type: 'set', key: el.dataset.key, value: el.value }), 1200);
+      const c0 = S.cur;
+      timers[el.dataset.key] = setTimeout(() => send({ type: 'set', key: el.dataset.key, value: el.value, ctx: c0 }), 1200);
     });
     root.addEventListener('change', e => {
       const el = e.target.closest('textarea[data-key]');
@@ -633,7 +663,7 @@
     });
     root.addEventListener('click', e => {
       if (e.target.id !== 'fillDraft' || !S.view) return;
-      if (!S.view.state.steps.length) { toast('먼저 ② 설계·실험에서 실험을 해 보세요.'); return; }
+      if (!S.view.state.steps.length) { toast('먼저 ‘설계·실험’에서 실험을 해 보세요.'); return; }
       const d = E.draftFrame(S.view);
       ['order', 'prop', 'tool', 'result'].forEach(k => { if (!(S.view.fields['frame.' + k] || '').trim()) send({ type: 'set', key: 'frame.' + k, value: d[k] }); });
     });
@@ -765,7 +795,7 @@
       });
       $('#gPub').onclick = publish; $('#gRef').onclick = refreshShare;
       const pt = {};
-      root.addEventListener('input', e => { const el = e.target.closest('[data-pres]'); if (!el) return; clearTimeout(pt[el.dataset.pres]); pt[el.dataset.pres] = setTimeout(() => send({ type: 'set', key: 'pres.' + el.dataset.pres, value: el.value }), 1000); });
+      root.addEventListener('input', e => { const el = e.target.closest('[data-pres]'); if (!el) return; clearTimeout(pt[el.dataset.pres]); const c0 = S.cur; pt[el.dataset.pres] = setTimeout(() => send({ type: 'set', key: 'pres.' + el.dataset.pres, value: el.value, ctx: c0 }), 1000); });
       root.addEventListener('change', e => { const el = e.target.closest('[data-pres]'); if (el) { clearTimeout(pt[el.dataset.pres]); send({ type: 'set', key: 'pres.' + el.dataset.pres, value: el.value }); } });
     }
     PRES.forEach(f => { const el = $(`[data-pres="${f[0]}"]`, root), val = S.view.fields['pres.' + f[0]] || ''; if (el && document.activeElement !== el && el.value !== val) el.value = val; });
@@ -843,12 +873,12 @@
 
   /* ---------- 교사용: 혼합물 전체 목록과 정답 ---------- */
   function answerKeyHTML() {
-    const grpOf = (fn, id) => { const g = []; for (let n = 1; n <= 12; n++) if (fn(n) === id) g.push(n); return g; };
+    const grpOf = (fn, id) => { const g = []; for (let n = 1; n <= (CFG.GROUPS || 6); n++) if (fn(n) === id) g.push(n); return g; };
     const sections = [
-      { title: '기본 혼합물 V (밀도·용해도·끓는점)', ids: E.VARIANT_IDS, fn: E.variantFor, mode: "MIX_MODE 'variant'" },
-      { title: '심화 혼합물 S (녹는점 추가)', ids: E.ADV_IDS, fn: E.advFor, mode: "MIX_MODE 'melting'" },
-      { title: '심화 혼합물 D (고체의 밀도차)', ids: E.SOL_IDS, fn: E.solFor, mode: "MIX_MODE 'solids'" },
-      { title: '연습용 혼합물 L (MIX_MODE \'fixed\')', ids: Object.keys(E.MIXES).filter(id => /^L/.test(id)), fn: null, mode: '' }
+      { title: '기본 활동 혼합물 V (밀도·용해도·끓는점)', ids: E.VARIANT_IDS, fn: E.variantFor, mode: "기본 활동 · MIX_MODE 'variant'" },
+      { title: '심화 탭 혼합물 S (녹는점 추가)', ids: E.ADV_IDS, fn: E.advFor, mode: '심화 탭' },
+      { title: '심화 탭 혼합물 D (고체의 밀도차)', ids: E.SOL_IDS, fn: E.solFor, mode: '심화 탭' },
+      { title: '연습 탭 혼합물 L (모든 모둠이 3개 모두 연습)', ids: E.PRACTICE_IDS, fn: null, mode: '연습 탭' }
     ];
     const one = (id, grp) => {
       const m = E.MIXES[id], subs = Array.from(new Set(m.comps.map(c => c.s)));
@@ -861,7 +891,7 @@
         <div class="table-wrap"><table class="props"><thead><tr><th>물질</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
         <p style="margin:8px 0 4px"><b>정답 분리 순서</b> <span class="muted">(주의할 점이 없는 최단 경로 1가지. 다른 순서도 가능할 수 있어요)</span></p><ol class="steps">${steps}</ol></details>`;
     };
-    return `<h2>📚 학생에게 배부되는 혼합물 전체와 정답</h2><p class="muted">모둠 번호 1~12 기준 자동 배정입니다. 모둠 번호가 종류 수보다 크면 처음 혼합물로 돌아가요(예: V는 9모둠이 1번과 같음). 수행평가에는 이 목록과 다른 혼합물을 쓰길 권해요.</p>` +
+    return `<h2>📚 학생에게 배부되는 혼합물 전체와 정답</h2><p class="muted">모둠 번호 1~${CFG.GROUPS || 6} 기준 자동 배정입니다. 같은 반 안에서는 서로 다른 혼합물을 받아요. 모둠 번호가 종류 수보다 크면 처음 혼합물로 돌아가요(예: V는 9모둠이 1번과 같음). 수행평가에는 이 목록과 다른 혼합물을 쓰길 권해요.</p>` +
       sections.map(sec => `<details class="card" style="margin:10px 0"><summary><b>${esc(sec.title)}</b> <span class="muted">${sec.ids.length}종${sec.mode ? ' · ' + esc(sec.mode) : ''}</span></summary>${sec.ids.map(id => one(id, sec.fn ? grpOf(sec.fn, id) : null)).join('')}</details>`).join('');
   }
 
@@ -875,14 +905,17 @@
       const cls = keyOf($('#tCls').value); if (!cls) return;
       store.set('ssl:tcls', $('#tCls').value.trim());
       const net = CFG.BACKEND_URL ? new RemoteNet(CFG.BACKEND_URL) : new LocalNet();
+      const mainOf = rm => mainFor(String(rm.room).split('-')[0]);
+      const rv = (rm, id) => E.replay(rm.events, { hintLimit: CFG.HINT_LIMIT, ctx: id || mainOf(rm), mainCtx: mainOf(rm) });
       const load = async () => {
         try {
           const r = await net.overview(cls);
           const rooms = (r.rooms || []).sort((a, b) => a.room.localeCompare(b.room, 'ko', { numeric: true }));
           $('#tInfo').textContent = rooms.length + '개 모둠 · ' + new Date().toLocaleTimeString('ko-KR');
-          const tbl = rooms.length ? `<div class="table-wrap" style="grid-column:1/-1"><table class="props cmp"><thead><tr><th>모둠</th><th>혼합물</th><th>분리 순서</th><th>이용한 특성</th><th>상태</th></tr></thead><tbody>${rooms.map(rm => { const v = E.replay(rm.events, { hintLimit: CFG.HINT_LIMIT }); return `<tr><td class="name">${esc(rm.room)}</td><td>${esc(Array.from(new Set(v.mix.comps.map(c => E.SUBS[c.s].name))).join(' + '))}</td><td>${esc(v.state.steps.map(s => E.toolLabel(s)).join(' → ') || '-')}</td><td>${esc(Array.from(new Set(v.state.steps.map(s => E.PROPS[s.prop]))).join(', ') || '-')}</td><td>${v.eval.done ? '✅' : '⏳'}</td></tr>`; }).join('')}</tbody></table></div>` : '';
+          const tbl = rooms.length ? `<div class="table-wrap" style="grid-column:1/-1"><table class="props cmp"><thead><tr><th>모둠</th><th>혼합물</th><th>분리 순서</th><th>이용한 특성</th><th>상태</th></tr></thead><tbody>${rooms.map(rm => { const v = rv(rm); return `<tr><td class="name">${esc(rm.room)}</td><td>${esc(Array.from(new Set(v.mix.comps.map(c => E.SUBS[c.s].name))).join(' + '))}</td><td>${esc(v.state.steps.map(s => E.toolLabel(s)).join(' → ') || '-')}</td><td>${esc(Array.from(new Set(v.state.steps.map(s => E.PROPS[s.prop]))).join(', ') || '-')}</td><td>${v.eval.done ? '✅' : '⏳'}</td></tr>`; }).join('')}</tbody></table></div>` : '';
           $('#tGrid').innerHTML = tbl + rooms.map(rm => {
-            const v = E.replay(rm.events, { hintLimit: CFG.HINT_LIMIT }), ev = v.eval;
+            const v = rv(rm), ev = v.eval, g = String(rm.room).split('-')[0];
+            const pDone = E.PRACTICE_IDS.filter(id => rv(rm, id).eval.done).length, aIds = [E.advFor(g), E.solFor(g)], aDone = aIds.filter(id => rv(rm, id).eval.done).length;
             const path = v.state.steps.map(s => E.toolLabel(s)).join(' → ') || '아직 시작 전';
             const last = rm.events.length ? Math.max.apply(null, rm.events.map(e => e.ts || 0)) : 0;
             const ago = last ? Math.max(0, Math.round((Date.now() - last) / 60000)) + '분 전' : '-';
@@ -891,6 +924,7 @@
               <div style="margin:6px 0">${esc(path)}</div>
               <div class="kv">단계 ${ev.steps} · 실패 ${v.stats.fails} · 되돌리기 ${v.stats.undos} · 힌트 ${v.hints.used}/${v.hints.limit} · 특성 선택 오류 ${ev.badProp} · 주의 ${ev.warnCount}</div>
               ${(() => { const a = aiSummary(v.fields); return `<div class="kv">🤖 AI 답변 검증 ${a.n}건 · 다른 값 발견 ${a.diff}건</div>` + a.items.slice(0, 2).map(r => `<div class="kv">· ${esc(r.sub)} ${esc(r.field)}: AI '${esc(aiVal(r, 'ai'))}' ↔ 자료 '${esc(aiVal(r, 'ref'))}'${r.temp ? ' (' + esc(r.temp) + '℃)' : ''}${r.src ? ' · 출처 ' + esc(r.src) : ''}</div>`).join(''); })()}
+              <div class="kv">🎯 연습 ${pDone}/${E.PRACTICE_IDS.length} 완료 · 🚀 심화 ${aDone}/${aIds.length} 완료</div>
               <div class="kv">접속: ${(rm.presence || []).map(p => esc(p.name) + (p.role ? '(' + esc(p.role) + ')' : '')).join(', ') || '없음'} · 마지막 활동 ${ago}</div>
               <div class="kv">${ev.done ? '✅ 분리 완료' : '⏳ 진행 중'}</div></div>`;
           }).join('') || '<p class="muted">아직 입장한 모둠이 없어요.</p>';

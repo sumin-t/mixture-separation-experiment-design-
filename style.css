@@ -264,3 +264,13 @@ input, select, textarea { font-size: max(16px, 1em); }   /* 입력 칸을 눌러
 .uwrap { display: flex; align-items: center; gap: 4px; }
 .uwrap .unit { font-weight: 800; white-space: nowrap; color: var(--ink); min-width: 0; }
 .uwrap input { min-width: 60px; flex: 1; }
+
+/* 활동 선택(연습·기본·심화) */
+.modes { display: flex; gap: 8px; margin: 4px 0 6px; flex-wrap: wrap; }
+.mode { flex: 1 1 0; min-width: 110px; border: 2px solid var(--ink); background: #fff; border-radius: 999px; padding: 10px 14px; font-weight: 800; min-height: 46px; font-size: 1rem; }
+.mode[aria-selected=true] { background: var(--teal); color: #fff; border-color: var(--ink); box-shadow: 0 3px 0 var(--ink); }
+.modehint { margin: 0 0 8px; font-size: .92rem; }
+.ctxbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.ctx { border: 2px solid var(--ink); background: #fff; border-radius: 10px; padding: 8px 12px; font-weight: 700; min-height: 44px; text-align: left; }
+.ctx[aria-selected=true], .ctx[aria-pressed=true] { background: var(--ink); color: #fff; }
+.tab.hidden { display: none; }

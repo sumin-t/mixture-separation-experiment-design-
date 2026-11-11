@@ -2,7 +2,7 @@
 window.SSL_CONFIG = {
   // Apps Script 웹 앱 URL (끝이 /exec). 비워 두면 '이 기기(브라우저)' 안에서만 동작합니다.
   // 비워 둔 상태에서도 같은 브라우저의 다른 탭끼리는 동기화되므로 미리 시험해 볼 수 있어요.
-  BACKEND_URL: 'https://script.google.com/macros/s/AKfycbxG4XvSMePggAhA243wln7LfUf1AQKtfrlja3NgfbZDYFgZBo457E_-Y6iO6Cv6I033oQ/exec',
+  BACKEND_URL: 'https://script.google.com/macros/s/AKfycbyuH6enomWsuXS4BcCYIZYht983IVNvmaXZXNBY-4vafvq4AUW9NZ2w1XcXZNYjWsk/exec',
 
   // 패들렛 보드 주소 (예: https://padlet.com/내계정/보드이름). 비워 두면 패들렛 메인 페이지가 열립니다.
   PADLET_URL: '',
@@ -17,8 +17,6 @@ window.SSL_CONFIG = {
     5: 'https://padlet.com/t223ontool4/2026-b-205-8md4igvnvyj6pvdq',
     6: 'https://padlet.com/t223ontool4/2026-b-206-h5h8rtjd515t88dl'
   },
-
-
 
   // 혼합물 배정 (모둠 번호에 따라 자동 배정, 같은 종류끼리는 특성·난이도가 같음)
   //  'variant' = 기본 혼합물 8종 (밀도·용해도·끓는점 / 분별 깔때기·거름 장치·증류 장치)

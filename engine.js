@@ -162,6 +162,7 @@
     };
   }
   const pick = (ids, n) => ids[(((Number(n) || 1) - 1) % ids.length + ids.length) % ids.length];
+  const PRACTICE_IDS = ['L1', 'L2', 'L3'];
   const advFor = n => pick(ADV_IDS, n), solFor = n => pick(SOL_IDS, n);
   const variantFor = n => VARIANT_IDS[(((Number(n) || 1) - 1) % VARIANT_IDS.length + VARIANT_IDS.length) % VARIANT_IDS.length];
 
@@ -486,7 +487,10 @@
   function replay(events, opts) {
     opts = opts || {};
     const hintLimit = opts.hintLimit === undefined ? 3 : opts.hintLimit;
-    let mixId = 'L2';
+    // opts.ctx: 이 혼합물(id)에 해당하는 이벤트만 재생한다. ctx가 없는 예전 이벤트는 opts.mainCtx(기본 활동 혼합물)로 본다.
+    let mixId = (opts.ctx && MIXES[opts.ctx]) ? opts.ctx : 'L2';
+    if (opts.ctx && MIXES[opts.ctx]) events = (events || []).filter(e => (e.ctx || opts.mainCtx || opts.ctx) === opts.ctx);
+    const fixedMix = !!(opts.ctx && MIXES[opts.ctx]);
     let stack = [initState(mixId)];
     const log = [];            // {kind:'step'|'fail', ...}
     const fields = {};
@@ -496,7 +500,8 @@
     (events || []).forEach(e => {
       switch (e.type) {
         case 'mixture':
-          mixId = MIXES[e.id] ? e.id : mixId;
+          if (!fixedMix) mixId = MIXES[e.id] ? e.id : mixId;
+          if (fixedMix) break;
           stack = [initState(mixId)]; log.length = 0; hintLevels = {};
           Object.keys(fields).forEach(k => { if (k.indexOf('frame.') === 0 || k.indexOf('ai.') === 0 || k.indexOf('pres.') === 0) delete fields[k]; });
           break;
@@ -557,6 +562,6 @@
   }
 
   return { SUBS, PROPS, TOOLS, TOOL_ORDER, MIXES, FIELDS, CHOICES, WARN_TEXT, answerOf, showValue, checkBlank,
-    initState, apply, evaluate, solve, solution, replay, hintKey, hintText, draftFrame, describe, subsOf,
+    initState, apply, evaluate, solve, solution, replay, PRACTICE_IDS, hintKey, hintText, draftFrame, describe, subsOf,
     COOL_TEMPS, VARIANT_IDS, variantFor, fieldsOf, propsOf, LIQUIDS, LIQUID_IDS, ADV_IDS, SOL_IDS, advFor, solFor, toolLabel, toolsOf: id => MIXES[id].tools || TOOL_ORDER };
 });
