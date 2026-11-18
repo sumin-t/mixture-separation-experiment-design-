@@ -612,7 +612,7 @@
     else if (act === 'prop') { S.sel.prop = S.sel.prop === id ? '' : id; queueDraft(); renderLab(); }
     else if (act === 'run') { if (S.sel.sample && S.sel.tool && S.sel.prop && (S.sel.tool !== 'cool' || S.sel.temp) && (S.sel.tool !== 'float' || S.sel.liquid)) send({ type: 'run', tool: S.sel.tool, input: S.sel.sample, prop: S.sel.prop, temp: S.sel.tool === 'cool' ? S.sel.temp : undefined, liquid: S.sel.tool === 'float' ? S.sel.liquid : undefined }); }
     else if (act === 'undo') send({ type: 'undo' });
-    else if (act === 'reset') { if (confirm('모둠 전체의 실험을 처음부터 다시 시작할까요?')) { S.banner = null; send({ type: 'reset' }); } }
+    else if (act === 'reset') { S.banner = null; send({ type: 'reset' }); }
     else if (act === 'ctx') { if (id !== S.view.mixId) useMode(S.mode, id); }
     else if (act === 'hint') send({ type: 'hint', key: S.view.key });
     else if (act === 'goframe') setTab('frame');
@@ -896,44 +896,98 @@
   }
 
   /* ---------- 교사용 ---------- */
+  // ▼ 여기에 원하시는 비밀번호를 직접 적어주세요 (현재 기본값: 1234)
+  const TEACHER_PWD = '0108';
+
   let tTimer = null;
   function buildTeacher() {
     showScreen('teacher');
-    if (!$('#tKey')) { const d = document.createElement('div'); d.className = 'card'; d.id = 'tKey'; d.innerHTML = answerKeyHTML(); $('#screenTeacher').appendChild(d); }
-    $('#tCls').value = store.get('ssl:tcls') || '';
-    const go = async () => {
-      const cls = keyOf($('#tCls').value); if (!cls) return;
-      store.set('ssl:tcls', $('#tCls').value.trim());
-      const net = CFG.BACKEND_URL ? new RemoteNet(CFG.BACKEND_URL) : new LocalNet();
-      const mainOf = rm => mainFor(String(rm.room).split('-')[0]);
-      const rv = (rm, id) => E.replay(rm.events, { hintLimit: CFG.HINT_LIMIT, ctx: id || mainOf(rm), mainCtx: mainOf(rm) });
-      const load = async () => {
-        try {
-          const r = await net.overview(cls);
-          const rooms = (r.rooms || []).sort((a, b) => a.room.localeCompare(b.room, 'ko', { numeric: true }));
-          $('#tInfo').textContent = rooms.length + '개 모둠 · ' + new Date().toLocaleTimeString('ko-KR');
-          const tbl = rooms.length ? `<div class="table-wrap" style="grid-column:1/-1"><table class="props cmp"><thead><tr><th>모둠</th><th>혼합물</th><th>분리 순서</th><th>이용한 특성</th><th>상태</th></tr></thead><tbody>${rooms.map(rm => { const v = rv(rm); return `<tr><td class="name">${esc(rm.room)}</td><td>${esc(Array.from(new Set(v.mix.comps.map(c => E.SUBS[c.s].name))).join(' + '))}</td><td>${esc(v.state.steps.map(s => E.toolLabel(s)).join(' → ') || '-')}</td><td>${esc(Array.from(new Set(v.state.steps.map(s => E.PROPS[s.prop]))).join(', ') || '-')}</td><td>${v.eval.done ? '✅' : '⏳'}</td></tr>`; }).join('')}</tbody></table></div>` : '';
-          $('#tGrid').innerHTML = tbl + rooms.map(rm => {
-            const v = rv(rm), ev = v.eval, g = String(rm.room).split('-')[0];
-            const pDone = E.PRACTICE_IDS.filter(id => rv(rm, id).eval.done).length, aIds = [E.advFor(g), E.solFor(g)], aDone = aIds.filter(id => rv(rm, id).eval.done).length;
-            const path = v.state.steps.map(s => E.toolLabel(s)).join(' → ') || '아직 시작 전';
-            const last = rm.events.length ? Math.max.apply(null, rm.events.map(e => e.ts || 0)) : 0;
-            const ago = last ? Math.max(0, Math.round((Date.now() - last) / 60000)) + '분 전' : '-';
-            return `<div class="tcard"><b>${esc(rm.room)}</b> <span class="tag">${v.mix.level} ${esc(v.mix.title)}</span>
-              <div class="progress">${ev.need.map(s => `<span class="prog ${ev.recovered.includes(s) ? 'ok' : ''}">${ev.recovered.includes(s) ? '✓ ' : ''}${E.SUBS[s].name}</span>`).join('')}</div>
-              <div style="margin:6px 0">${esc(path)}</div>
-              <div class="kv">단계 ${ev.steps} · 실패 ${v.stats.fails} · 되돌리기 ${v.stats.undos} · 힌트 ${v.hints.used}/${v.hints.limit} · 특성 선택 오류 ${ev.badProp} · 주의 ${ev.warnCount}</div>
-              ${(() => { const a = aiSummary(v.fields); return `<div class="kv">🤖 AI 답변 검증 ${a.n}건 · 다른 값 발견 ${a.diff}건</div>` + a.items.slice(0, 2).map(r => `<div class="kv">· ${esc(r.sub)} ${esc(r.field)}: AI '${esc(aiVal(r, 'ai'))}' ↔ 자료 '${esc(aiVal(r, 'ref'))}'${r.temp ? ' (' + esc(r.temp) + '℃)' : ''}${r.src ? ' · 출처 ' + esc(r.src) : ''}</div>`).join(''); })()}
-              <div class="kv">🎯 연습 ${pDone}/${E.PRACTICE_IDS.length} 완료 · 🚀 심화 ${aDone}/${aIds.length} 완료</div>
-              <div class="kv">접속: ${(rm.presence || []).map(p => esc(p.name) + (p.role ? '(' + esc(p.role) + ')' : '')).join(', ') || '없음'} · 마지막 활동 ${ago}</div>
-              <div class="kv">${ev.done ? '✅ 분리 완료' : '⏳ 진행 중'}</div></div>`;
-          }).join('') || '<p class="muted">아직 입장한 모둠이 없어요.</p>';
-        } catch (e) { $('#tInfo').textContent = '불러오지 못했어요.'; }
+    
+    const authBox = $('#teacherAuth');
+    const contentBox = $('#teacherContent');
+    const isAuth = () => { try { return sessionStorage.getItem('ssl:t_auth') === TEACHER_PWD; } catch (e) { return false; } };
+
+    function initDashboard() {
+      authBox.classList.add('hidden');
+      contentBox.classList.remove('hidden');
+
+      if (!$('#tKey')) { 
+        const d = document.createElement('div'); 
+        d.className = 'card'; 
+        d.id = 'tKey'; 
+        d.innerHTML = answerKeyHTML(); 
+        contentBox.appendChild(d); 
+      }
+      $('#tCls').value = store.get('ssl:tcls') || '';
+      
+      const go = async () => {
+        const cls = keyOf($('#tCls').value); if (!cls) return;
+        store.set('ssl:tcls', $('#tCls').value.trim());
+        const net = CFG.BACKEND_URL ? new RemoteNet(CFG.BACKEND_URL) : new LocalNet();
+        const mainOf = rm => mainFor(String(rm.room).split('-')[0]);
+        const rv = (rm, id) => E.replay(rm.events, { hintLimit: CFG.HINT_LIMIT, ctx: id || mainOf(rm), mainCtx: mainOf(rm) });
+        const load = async () => {
+          try {
+            const r = await net.overview(cls);
+            const rooms = (r.rooms || []).sort((a, b) => a.room.localeCompare(b.room, 'ko', { numeric: true }));
+            $('#tInfo').textContent = rooms.length + '개 모둠 · ' + new Date().toLocaleTimeString('ko-KR');
+            const tbl = rooms.length ? `<div class="table-wrap" style="grid-column:1/-1"><table class="props cmp"><thead><tr><th>모둠</th><th>혼합물</th><th>분리 순서</th><th>이용한 특성</th><th>상태</th></tr></thead><tbody>${rooms.map(rm => { const v = rv(rm); return `<tr><td class="name">${esc(rm.room)}</td><td>${esc(Array.from(new Set(v.mix.comps.map(c => E.SUBS[c.s].name))).join(' + '))}</td><td>${esc(v.state.steps.map(s => E.toolLabel(s)).join(' → ') || '-')}</td><td>${esc(Array.from(new Set(v.state.steps.map(s => E.PROPS[s.prop]))).join(', ') || '-')}</td><td>${v.eval.done ? '✅' : '⏳'}</td></tr>`; }).join('')}</tbody></table></div>` : '';
+            $('#tGrid').innerHTML = tbl + rooms.map(rm => {
+              const v = rv(rm), ev = v.eval, g = String(rm.room).split('-')[0];
+              const pDone = E.PRACTICE_IDS.filter(id => rv(rm, id).eval.done).length, aIds = [E.advFor(g), E.solFor(g)], aDone = aIds.filter(id => rv(rm, id).eval.done).length;
+              const path = v.state.steps.map(s => E.toolLabel(s)).join(' → ') || '아직 시작 전';
+              const last = rm.events.length ? Math.max.apply(null, rm.events.map(e => e.ts || 0)) : 0;
+              const ago = last ? Math.max(0, Math.round((Date.now() - last) / 60000)) + '분 전' : '-';
+              return `<div class="tcard"><b>${esc(rm.room)}</b> <span class="tag">${v.mix.level} ${esc(v.mix.title)}</span>
+                <div class="progress">${ev.need.map(s => `<span class="prog ${ev.recovered.includes(s) ? 'ok' : ''}">${ev.recovered.includes(s) ? '✓ ' : ''}${E.SUBS[s].name}</span>`).join('')}</div>
+                <div style="margin:6px 0">${esc(path)}</div>
+                <div class="kv">단계 ${ev.steps} · 실패 ${v.stats.fails} · 되돌리기 ${v.stats.undos} · 힌트 ${v.hints.used}/${v.hints.limit} · 특성 선택 오류 ${ev.badProp} · 주의 ${ev.warnCount}</div>
+                ${(() => { const a = aiSummary(v.fields); return `<div class="kv">🤖 AI 답변 검증 ${a.n}건 · 다른 값 발견 ${a.diff}건</div>` + a.items.slice(0, 2).map(r => `<div class="kv">· ${esc(r.sub)} ${esc(r.field)}: AI '${esc(aiVal(r, 'ai'))}' ↔ 자료 '${esc(aiVal(r, 'ref'))}'${r.temp ? ' (' + esc(r.temp) + '℃)' : ''}${r.src ? ' · 출처 ' + esc(r.src) : ''}</div>`).join(''); })()}
+                <div class="kv">🎯 연습 ${pDone}/${E.PRACTICE_IDS.length} 완료 · 🚀 심화 ${aDone}/${aIds.length} 완료</div>
+                <div class="kv">접속: ${(rm.presence || []).map(p => esc(p.name) + (p.role ? '(' + esc(p.role) + ')' : '')).join(', ') || '없음'} · 마지막 활동 ${ago}</div>
+                <div class="kv">${ev.done ? '✅ 분리 완료' : '⏳ 진행 중'}</div></div>`;
+            }).join('') || '<p class="muted">아직 입장한 모둠이 없어요.</p>';
+          } catch (e) { $('#tInfo').textContent = '불러오지 못했어요.'; }
+        };
+        clearInterval(tTimer); await load(); tTimer = setInterval(load, 8000);
       };
-      clearInterval(tTimer); await load(); tTimer = setInterval(load, 8000);
+      $('#tGo').onclick = go;
+      if ($('#tCls').value) go();
+    }
+
+    // 로그아웃(잠금) 버튼
+    $('#tLogout').onclick = () => {
+      clearInterval(tTimer);
+      try { sessionStorage.removeItem('ssl:t_auth'); } catch (e) {}
+      contentBox.classList.add('hidden');
+      authBox.classList.remove('hidden');
+      $('#tPwd').value = '';
+      $('#tAuthErr').textContent = '';
     };
-    $('#tGo').onclick = go;
-    if ($('#tCls').value) go();
+
+    // 비밀번호 폼 제출 처리
+    $('#tAuthForm').onsubmit = e => {
+      e.preventDefault();
+      const pwd = $('#tPwd').value;
+      if (pwd === TEACHER_PWD) {
+        try { sessionStorage.setItem('ssl:t_auth', TEACHER_PWD); } catch (er) {}
+        $('#tAuthErr').textContent = '';
+        initDashboard();
+      } else {
+        $('#tAuthErr').textContent = '비밀번호가 일치하지 않습니다.';
+        $('#tPwd').value = '';
+        $('#tPwd').focus();
+      }
+    };
+
+    // 이미 인증된 세션이면 바로 대시보드 열기
+    if (isAuth()) {
+      initDashboard();
+    } else {
+      authBox.classList.remove('hidden');
+      contentBox.classList.add('hidden');
+      setTimeout(() => $('#tPwd').focus(), 50);
+    }
   }
 
   /* ---------- 시작 ---------- */

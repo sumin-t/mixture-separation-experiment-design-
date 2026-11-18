@@ -22,10 +22,10 @@
   <!-- 입장 -->
   <section id="screenJoin" class="join card hidden">
     <h1>모둠 입장</h1>
-    <p class="muted">같은 <b>반</b>과 <b>모둠</b> 숫자를 입력한 사람은 <b>같은 화면</b>을 함께 보고 입력해요. (예: 6반 7모둠 → 반 <b>2-6</b>, 모둠 <b>7</b>)</p>
+    <p class="muted">같은 <b>반</b>과 <b>모둠</b> 숫자를 입력한 사람은 <b>같은 화면</b>을 함께 보고 입력해요. (예: 2반 3모둠 → 반 <b>2-3</b>, 모둠 <b>3</b>)</p>
     <form id="joinForm" autocomplete="off">
-      <label class="field"><span>반 (학년-반 숫자, 예: 2-6)</span><input type="text" id="jCls" maxlength="12" required placeholder="2-3" inputmode="text"></label>
-      <label class="field"><span>모둠 (숫자, 예: 7)</span><input type="text" id="jRoom" maxlength="12" required placeholder="3" inputmode="numeric"></label>
+      <label class="field"><span>반 (학년-반 숫자, 예: 2-3)</span><input type="text" id="jCls" maxlength="12" required placeholder="2-3" inputmode="text"></label>
+      <label class="field"><span>모둠 (숫자, 예: 3)</span><input type="text" id="jRoom" maxlength="12" required placeholder="3" inputmode="numeric"></label>
       <label class="field"><span>내 이름(별명이나 번호도 좋아요)</span><input type="text" id="jName" maxlength="8" required placeholder="예: 지우"></label>
       <div class="field"><span>내 역할 (한 모둠에 여러 기기가 있을 때 나누어 맡아요)</span>
         <div class="roles" id="roles"></div>
@@ -52,14 +52,37 @@
 
   <!-- 교사 -->
   <section id="screenTeacher" class="hidden">
-    <div class="card">
-      <h2>교사용 대시보드</h2>
-      <div class="row">
-        <label class="field" style="margin:0"><span>반</span><input type="text" id="tCls" maxlength="12" placeholder="2-3"></label>
-        <button class="btn primary" id="tGo" style="align-self:flex-end">불러오기</button>
-        <span class="muted" id="tInfo" style="align-self:flex-end"></span>
+    <!-- 교사 비밀번호 인증 화면 -->
+    <div id="teacherAuth" class="join card" style="max-width: 420px; margin: 40px auto;">
+      <h2>🔒 교사용 화면 인증</h2>
+      <p class="muted">교사용 대시보드와 정답 확인을 위해 비밀번호를 입력해 주세요.</p>
+      <form id="tAuthForm" autocomplete="off">
+        <label class="field">
+          <span>비밀번호</span>
+          <input type="password" id="tPwd" required placeholder="비밀번호 입력">
+        </label>
+        <p id="tAuthErr" class="muted" style="color: #b3261e; font-weight: bold; min-height: 20px; margin: 4px 0 8px;"></p>
+        <div class="row">
+          <button class="btn primary" type="submit" style="flex: 1;">확인</button>
+          <a href="?" class="btn" style="text-decoration: none; text-align: center;">학생 화면으로</a>
+        </div>
+      </form>
+    </div>
+
+    <!-- 인증 성공 시 보여질 실제 교사용 대시보드 -->
+    <div id="teacherContent" class="hidden">
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h2 style="margin: 0;">교사용 대시보드</h2>
+          <button class="btn small" id="tLogout" type="button">잠금 (로그아웃)</button>
+        </div>
+        <div class="row">
+          <label class="field" style="margin:0"><span>반</span><input type="text" id="tCls" maxlength="12" placeholder="2-3"></label>
+          <button class="btn primary" id="tGo" style="align-self:flex-end">불러오기</button>
+          <span class="muted" id="tInfo" style="align-self:flex-end"></span>
+        </div>
+        <div class="tgrid" id="tGrid"></div>
       </div>
-      <div class="tgrid" id="tGrid"></div>
     </div>
   </section>
 </main>
